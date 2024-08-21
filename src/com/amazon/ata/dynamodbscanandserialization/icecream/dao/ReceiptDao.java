@@ -5,11 +5,17 @@ import com.amazon.ata.dynamodbscanandserialization.icecream.model.Receipt;
 import com.amazon.ata.dynamodbscanandserialization.icecream.model.Sundae;
 
 import com.amazonaws.services.dynamodbv2.datamodeling.DynamoDBMapper;
+import com.amazonaws.services.dynamodbv2.datamodeling.DynamoDBScanExpression;
+import com.amazonaws.services.dynamodbv2.datamodeling.PaginatedScanList;
+import com.amazonaws.services.dynamodbv2.datamodeling.ScanResultPage;
+import com.amazonaws.services.dynamodbv2.model.AttributeValue;
 
 import java.math.BigDecimal;
 import java.time.ZonedDateTime;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import javax.inject.Inject;
 
 /**
@@ -54,7 +60,20 @@ public class ReceiptDao {
      * @return the total values of sundae sales for the requested time period
      */
     public BigDecimal getSalesBetweenDates(ZonedDateTime fromDate, ZonedDateTime toDate) {
-        return new BigDecimal(-1);
+        // create a map to hold the start and end date
+        Map<String, AttributeValue> valueMap = new HashMap<>();
+        // add start and end dates to the valueMap
+        valueMap.put(":startDate", new AttributeValue(converter.convert(fromDate)));
+        valueMap.put(":endDate", new AttributeValue(converter.convert(toDate)));
+        // create the expression
+        DynamoDBScanExpression scanExpression = new DynamoDBScanExpression()
+                .withFilterExpression("purchaseDate between :startDate and :endDate")
+                .withExpressionAttributeValues(valueMap);
+        // get the sales total for the given date range
+        PaginatedScanList<Receipt> list = mapper.scan(Receipt.class, scanExpression);
+        return list.stream()
+                .map(Receipt::getSalesTotal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
     /**
@@ -66,6 +85,16 @@ public class ReceiptDao {
      * @return a list of Receipts
      */
     public List<Receipt> getReceiptsPaginated(int limit, Receipt exclusiveStartKey) {
-        return Collections.emptyList();
+        DynamoDBScanExpression scanExpression = new DynamoDBScanExpression();
+        scanExpression.setLimit(limit);
+        // starting keymap to hold the customer id and purchase date
+        if (exclusiveStartKey != null) {
+            Map<String, AttributeValue> valueMap = new HashMap<>();
+            valueMap.put("customerId", new AttributeValue().withS(exclusiveStartKey.getCustomerId()));
+            valueMap.put("purchaseDate", new AttributeValue().withS(converter.convert(exclusiveStartKey.getPurchaseDate())));
+        }
+
+        ScanResultPage<Receipt> receiptPage = mapper.scanPage(Receipt.class, scanExpression);
+        return receiptPage.getResults();
     }
 }
